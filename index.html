@@ -309,6 +309,31 @@ textarea.fi{resize:none;min-height:74px;line-height:1.5;}
 #lightbox{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:1000;display:none;align-items:center;justify-content:center;cursor:zoom-out;}
 #lightbox.open{display:flex;}
 #lb-img{max-width:90vw;max-height:90vh;object-fit:contain;border-radius:8px;}
+/* ── LOCK CHAT ── */
+.lock-pin-screen{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:var(--bg);}
+.lock-pin-icon{font-size:38px;}
+.lock-pin-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:700;}
+.lock-pin-sub{font-size:13px;color:var(--txt2);text-align:center;max-width:220px;line-height:1.5;}
+.pin-dots{display:flex;gap:10px;margin:4px 0;}
+.pin-dot{width:13px;height:13px;border-radius:50%;background:var(--bor2);border:2px solid var(--bor2);transition:background .15s;}
+.pin-dot.filled{background:var(--acc);border-color:var(--acc);}
+.pin-pad{display:grid;grid-template-columns:repeat(3,58px);gap:8px;}
+.pin-key{width:58px;height:58px;border-radius:50%;background:var(--pan);border:1px solid var(--bor2);color:var(--txt);font-family:'Syne',sans-serif;font-size:19px;font-weight:700;cursor:pointer;transition:var(--tr);display:flex;align-items:center;justify-content:center;}
+.pin-key:hover{background:var(--bor2);}
+.pin-key.wide{grid-column:span 3;border-radius:12px;height:40px;font-size:14px;font-weight:500;font-family:'DM Sans',sans-serif;}
+.pin-error{color:var(--dan);font-size:12px;min-height:16px;text-align:center;}
+/* Sidebar 3-dot menu */
+.sb-3dot{background:none;border:none;color:var(--mut);cursor:pointer;padding:2px 4px;border-radius:4px;opacity:0;transition:opacity .15s;flex-shrink:0;display:flex;align-items:center;}
+.sb-item:hover .sb-3dot{opacity:1;}
+.sb-ctx{position:fixed;background:var(--sur);border:1px solid var(--bor);border-radius:10px;z-index:700;min-width:155px;box-shadow:0 8px 24px rgba(0,0,0,.4);overflow:hidden;}
+.sb-ctx-item{padding:9px 13px;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;transition:background .12s;}
+.sb-ctx-item:hover{background:var(--pan);}
+.sb-ctx-item.danger{color:var(--dan);}
+.sb-ctx-item.lock{color:var(--acc);}
+.item-lockbadge{font-size:10px;flex-shrink:0;}
+/* Locked section in sidebar */
+.sb-locked-list{max-height:120px;overflow-y:auto;}
+
 /* NOTIF PANEL */
 #notif-panel{position:fixed;top:52px;left:14px;width:var(--sw);background:var(--sur);border:1px solid var(--bor);border-radius:14px;z-index:500;display:none;flex-direction:column;max-height:400px;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.4);animation:slideUp .2s ease;}
 #notif-panel.open{display:flex;}
@@ -846,7 +871,7 @@ function initSetup(user){
 // ── LAUNCH ──
 function launchApp(){
   showScreen(null);$('app').classList.add('visible');
-  updateTray();listenMyRooms();listenDMs();listenMessageRequests();listenNotifications();listenIncomingCalls();
+  updateTray();listenMyRooms();listenDMs();listenNotifications();listenIncomingCalls();
   syncPendingRequests();
   db.collection('users').doc(ME.uid).update({lastSeen:tsNow()}).catch(()=>{});
 }
@@ -884,60 +909,68 @@ function listenMyRooms(){
 }
 function listenDMs(){
   if(dmUnsub)dmUnsub();
-  dmUnsub=db.collection('dms').where('members','array-contains',ME.uid).where('isRequest','==',false)
+  // Show ALL DMs regardless of request status — sender sees their own outgoing requests under DMs too
+  dmUnsub=db.collection('dms').where('members','array-contains',ME.uid)
     .onSnapshot(snap=>{
       const list=$('dm-list');list.innerHTML='';
+      const reqList=$('req-list');reqList.innerHTML='';
+      const sec=$('req-section');
+      let reqCount=0;
       snap.forEach(doc=>{
         const dm=doc.data();if(dm.declined)return;
         const oid=dm.members.find(m=>m!==ME.uid);
         const other=dm.memberInfo?.[oid]||{username:'User',photoURL:''};
-        const li=document.createElement('li');li.className='sb-item'+(activeCh?.id===doc.id?' active':'');li.dataset.id=doc.id;
-        li.innerHTML=`<img class="item-av" src="${esc(other.photoURL||dicebear(oid))}" alt=""/><span class="item-name">${esc(other.username)}</span>`;
-        li.onclick=()=>openDM(doc.id,other.username,other.photoURL||'',oid,false);list.appendChild(li);
+        const isReq=dm.isRequest===true;
+        const iAmSender=dm.requestFrom===ME.uid;
+        if(isReq && !iAmSender){
+          // Incoming request — show in Message Requests section
+          reqCount++;
+          const li=document.createElement('li');li.className='sb-item'+(activeCh?.id===doc.id?' active':'');li.dataset.id=doc.id;
+          li.innerHTML=`<img class="item-av" src="${esc(other.photoURL||dicebear(oid))}" alt=""/><span class="item-name">${esc(other.username)}</span><span class="item-badge">!</span>`;
+          li.onclick=()=>openDM(doc.id,other.username,other.photoURL||'',oid,true);
+          reqList.appendChild(li);
+        } else {
+          // Regular DM or outgoing request — show in DMs
+          const li=document.createElement('li');li.className='sb-item'+(activeCh?.id===doc.id?' active':'');li.dataset.id=doc.id;
+          li.innerHTML=`<img class="item-av" src="${esc(other.photoURL||dicebear(oid))}" alt=""/><span class="item-name">${esc(other.username)}${isReq&&iAmSender?' <span style="font-size:10px;color:var(--mut)">(pending)</span>':''}</span>`;
+          li.onclick=()=>openDM(doc.id,other.username,other.photoURL||'',oid,isReq&&!iAmSender);
+          list.appendChild(li);
+        }
       });
+      sec.style.display=reqCount>0?'flex':'none';
+      // Update badge label
+      const badge=$('req-count-badge');
+      if(badge) badge.textContent=reqCount>0?`Message Requests (${reqCount})`:'Message Requests';
     },err=>console.warn('DMs:',err));
 }
-// FIX #8: Message requests with count badge, sender side shows in DMs not req
-function listenMessageRequests(){
-  if(reqUnsub)reqUnsub();
-  reqUnsub=db.collection('dms').where('members','array-contains',ME.uid).where('isRequest','==',true)
-    .onSnapshot(snap=>{
-      const list=$('req-list');const sec=$('req-section');
-      list.innerHTML='';let count=0;
-      snap.forEach(doc=>{
-        const dm=doc.data();if(dm.declined)return;
-        const oid=dm.members.find(m=>m!==ME.uid);
-        // If ME is the sender, show under DMs not requests
-        if(dm.requestFrom===ME.uid)return;
-        count++;
-        const other=dm.memberInfo?.[oid]||{username:'User',photoURL:''};
-        const li=document.createElement('li');li.className='sb-item'+(activeCh?.id===doc.id?' active':'');li.dataset.id=doc.id;
-        li.innerHTML=`<img class="item-av" src="${esc(other.photoURL||dicebear(oid))}" alt=""/><span class="item-name">${esc(other.username)}</span><span class="item-badge">!</span>`;
-        li.onclick=()=>openDM(doc.id,other.username,other.photoURL||'',oid,true);list.appendChild(li);
-      });
-      sec.style.display=count>0?'flex':'none';
-      if($('req-count-badge'))$('req-count-badge').textContent=count>0?count:'';
-    },err=>console.warn('Reqs:',err));
-}
+// Message requests are now handled inside listenDMs above
 
-// ── NOTIFICATIONS (FIX #1d: proper real-time listener for recipient) ──
+// ── NOTIFICATIONS — listens to ALL notifs for this user, no orderBy needed ──
 function listenNotifications(){
   if(notifUnsub)notifUnsub();
-  // Listen to ALL unread notifs for this user - works regardless of who sent it
+  // Only filter by toUid — no orderBy, no read filter (avoids index requirement)
   notifUnsub=db.collection('notifications')
     .where('toUid','==',ME.uid)
-    .where('read','==',false)
-    .orderBy('createdAt','desc')
     .onSnapshot(snap=>{
-      $('notif-badge').classList[snap.size>0?'remove':'add']('hidden');
-      renderNotifications(snap.docs);
-    },err=>console.warn('Notifs error (check Firestore rules):',err.code,err.message));
+      // Count unread in JS (not in query) so no index needed
+      const unread=snap.docs.filter(d=>d.data().read===false);
+      $('notif-badge').classList[unread.length>0?'remove':'add']('hidden');
+      if(unread.length>0) $('notif-badge').textContent=unread.length>9?'9+':unread.length;
+      // Sort newest first in JS
+      const sorted=[...snap.docs].sort((a,b)=>{
+        const ta=a.data().createdAt?.toMillis?.()||0;
+        const tb=b.data().createdAt?.toMillis?.()||0;
+        return tb-ta;
+      });
+      renderNotifications(sorted);
+    },err=>console.warn('Notifs listener error:',err.code,err.message));
 }
 function renderNotifications(docs){
   const list=$('notif-list');
-  if(!docs.length){list.innerHTML='<div class="notif-empty">No notifications yet.</div>';return;}
+  const unread=docs.filter(d=>d.data().read===false);
+  if(!unread.length){list.innerHTML='<div class="notif-empty">No new notifications.</div>';return;}
   list.innerHTML='';
-  docs.forEach(doc=>{
+  unread.forEach(doc=>{
     const n=doc.data();
     const div=document.createElement('div');div.className='notif-item';
     const timeStr=n.createdAt?.toDate?n.createdAt.toDate().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'';
@@ -954,7 +987,16 @@ function renderNotifications(docs){
     list.appendChild(div);
   });
 }
-$('notif-btn').onclick=e=>{e.stopPropagation();$('notif-panel').classList.toggle('open');};
+$('notif-btn').onclick=e=>{
+  e.stopPropagation();
+  $('notif-panel').classList.toggle('open');
+  // Mark all as read only when panel is OPENED, not when notifications are saved
+  if($('notif-panel').classList.contains('open')){
+    db.collection('notifications').where('toUid','==',ME.uid).where('read','==',false).get()
+      .then(snap=>snap.forEach(d=>d.ref.update({read:true})))
+      .catch(()=>{});
+  }
+};
 
 // ── FRIEND REQUESTS (FIX: proper pending state, db-backed) ──
 async function sendFriendRequest(toUid,toUsername,toPhoto){
@@ -1240,9 +1282,22 @@ function renderMsg(msg,msgId,msgPath){
       </div>
       ${body}
     </div>
-    ${canDelete||canEdit?`<button class="msg-opts-btn" onclick="showMsgCtx(event,'${msgId}','${msgPath}',${JSON.stringify(msg.type)},${JSON.stringify(msg.text||'')},${isMe},${canDelete},${canEdit})">
-      <svg width="12" height="12" fill="currentColor" viewBox="0 0 24 24"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
-    </button>`:''}`;
+    `;
+  // 3-dot button: for MY messages (me) put BEFORE msg-col, for others AFTER
+  if(canDelete||canEdit){
+    const optBtn=document.createElement('button');
+    optBtn.className='msg-opts-btn';
+    optBtn.innerHTML='<svg width="12" height="12" fill="currentColor" viewBox="0 0 24 24"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>';
+    optBtn.onclick=ev=>showMsgCtx(ev,msgId,msgPath,msg.type,msg.text||'',isMe,canDelete,canEdit);
+    if(isMe){
+      // My message: dot goes RIGHT before the msg-col (left side of my bubble)
+      const col=grp.querySelector('.msg-col');
+      grp.insertBefore(optBtn,col);
+    } else {
+      // Others: dot goes AFTER msg-col (right side of their bubble)
+      grp.appendChild(optBtn);
+    }
+  }
   area.appendChild(grp);
 }
 
