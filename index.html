@@ -142,11 +142,10 @@ textarea.fi{resize:none;min-height:74px;line-height:1.5;}
 .rw-title{font-family:'Syne',sans-serif;font-size:20px;font-weight:800;letter-spacing:-.4px;}
 .rw-desc{font-size:12.5px;color:var(--txt2);}
 /* Message group with 3-dot menu */
-.msg-grp{display:flex;gap:9px;padding:3px 0;animation:msgIn .2s ease both;position:relative;}
+.msg-grp{display:flex;gap:6px;padding:3px 0;animation:msgIn .2s ease both;align-items:flex-end;}
 .msg-grp.me{flex-direction:row-reverse;}
 .msg-grp:hover .msg-opts-btn{opacity:1;}
-.msg-opts-btn{position:absolute;top:4px;right:4px;opacity:0;background:var(--pan);border:1px solid var(--bor);border-radius:6px;cursor:pointer;width:24px;height:24px;display:flex;align-items:center;justify-content:center;color:var(--txt2);transition:opacity .15s,background var(--tr);z-index:2;}
-.msg-grp.me .msg-opts-btn{right:auto;left:4px;}
+.msg-opts-btn{opacity:0;background:var(--pan);border:1px solid var(--bor);border-radius:6px;cursor:pointer;width:22px;height:22px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--txt2);transition:opacity .15s,background var(--tr);align-self:center;}
 .msg-opts-btn:hover{background:var(--bor2);color:var(--txt);}
 .msg-av{width:32px;height:32px;border-radius:50%;object-fit:cover;flex-shrink:0;align-self:flex-end;background:var(--bor);cursor:pointer;}
 .msg-av:hover{opacity:.85;}
@@ -509,6 +508,10 @@ textarea.fi{resize:none;min-height:74px;line-height:1.5;}
       <span class="sec-lbl" style="color:var(--acc2);">Message Requests <span id="req-count-badge" style="background:var(--dan);color:#fff;border-radius:99px;padding:1px 6px;font-size:10px;margin-left:3px;"></span></span>
     </div>
     <ul class="sb-list sb-reqs" id="req-list"></ul>
+    <div class="sb-sec" id="locked-section" style="display:none;">
+      <span class="sec-lbl" style="color:var(--mut);">🔐 Locked Chats</span>
+    </div>
+    <ul class="sb-list sb-locked-list" id="locked-list"></ul>
     <div class="user-tray">
       <img id="tray-av" src="" alt="me" title="Edit profile"/>
       <div class="tray-info">
@@ -685,6 +688,25 @@ textarea.fi{resize:none;min-height:74px;line-height:1.5;}
     <div class="modal-acts">
       <button class="btn-g" data-close="edit-msg-ov">Cancel</button>
       <button class="btn-p" id="edit-msg-confirm" style="flex:1">Save Edit</button>
+    </div>
+  </div>
+</div>
+
+<!-- LOCK CHAT PIN MODAL -->
+<div class="overlay" id="pin-ov">
+  <div class="modal" style="max-width:320px;align-items:center;text-align:center;">
+    <div class="modal-hdr" style="width:100%;"><div class="modal-title" id="pin-title">Set PIN</div><button class="close-btn" data-close="pin-ov">✕</button></div>
+    <div style="font-size:11.5px;color:var(--txt2);" id="pin-sub">Choose a 4-digit PIN to lock this chat.</div>
+    <div class="pin-dots" id="pin-dots">
+      <div class="pin-dot" id="pd0"></div><div class="pin-dot" id="pd1"></div>
+      <div class="pin-dot" id="pd2"></div><div class="pin-dot" id="pd3"></div>
+    </div>
+    <div class="pin-error" id="pin-error"></div>
+    <div class="pin-pad">
+      <button class="pin-key" onclick="pinKey('1')">1</button><button class="pin-key" onclick="pinKey('2')">2</button><button class="pin-key" onclick="pinKey('3')">3</button>
+      <button class="pin-key" onclick="pinKey('4')">4</button><button class="pin-key" onclick="pinKey('5')">5</button><button class="pin-key" onclick="pinKey('6')">6</button>
+      <button class="pin-key" onclick="pinKey('7')">7</button><button class="pin-key" onclick="pinKey('8')">8</button><button class="pin-key" onclick="pinKey('9')">9</button>
+      <button class="pin-key" onclick="pinKey('del')" style="font-size:13px;">⌫</button><button class="pin-key" onclick="pinKey('0')">0</button><button class="pin-key" onclick="pinKey('del')" style="visibility:hidden;"></button>
     </div>
   </div>
 </div>
@@ -872,7 +894,7 @@ function initSetup(user){
 function launchApp(){
   showScreen(null);$('app').classList.add('visible');
   updateTray();listenMyRooms();listenDMs();listenNotifications();listenIncomingCalls();
-  syncPendingRequests();
+  syncPendingRequests();refreshLockedSidebar();
   db.collection('users').doc(ME.uid).update({lastSeen:tsNow()}).catch(()=>{});
 }
 function updateTray(){
@@ -898,12 +920,16 @@ function listenMyRooms(){
   if(roomUnsub)roomUnsub();
   roomUnsub=db.collection('rooms').where('memberIds','array-contains',ME.uid).onSnapshot(snap=>{
     const list=$('room-list');list.innerHTML='';
+    const locked=getLockedData();
     snap.forEach(doc=>{
       const r=doc.data();
+      if(locked[doc.id])return; // hide locked rooms from main list
       const li=document.createElement('li');li.className='sb-item'+(activeCh?.id===doc.id?' active':'');li.dataset.id=doc.id;
       const roleIcon=r.ownerId===ME.uid?'👑':r.moderators?.includes(ME.uid)?'🛡':'';
-      li.innerHTML=`<span class="item-icon">${r.isPrivate?'🔒':'#'}</span><span class="item-name">${esc(r.name)} ${roleIcon}</span>`;
-      li.onclick=()=>openRoom(doc.id,r);list.appendChild(li);
+      li.innerHTML=`<span class="item-icon">${r.isPrivate?'🔒':'#'}</span><span class="item-name" style="flex:1">${esc(r.name)} ${roleIcon}</span>`;
+      li.onclick=()=>openRoom(doc.id,r);
+      addSb3dot(li,doc.id,'room',r.name);
+      list.appendChild(li);
     });
   },err=>console.warn('Rooms:',err));
 }
@@ -915,6 +941,7 @@ function listenDMs(){
       const list=$('dm-list');list.innerHTML='';
       const reqList=$('req-list');reqList.innerHTML='';
       const sec=$('req-section');
+      const locked=getLockedData();
       let reqCount=0;
       snap.forEach(doc=>{
         const dm=doc.data();if(dm.declined)return;
@@ -926,14 +953,16 @@ function listenDMs(){
           // Incoming request — show in Message Requests section
           reqCount++;
           const li=document.createElement('li');li.className='sb-item'+(activeCh?.id===doc.id?' active':'');li.dataset.id=doc.id;
-          li.innerHTML=`<img class="item-av" src="${esc(other.photoURL||dicebear(oid))}" alt=""/><span class="item-name">${esc(other.username)}</span><span class="item-badge">!</span>`;
+          li.innerHTML=`<img class="item-av" src="${esc(other.photoURL||dicebear(oid))}" alt=""/><span class="item-name" style="flex:1">${esc(other.username)}</span><span class="item-badge">!</span>`;
           li.onclick=()=>openDM(doc.id,other.username,other.photoURL||'',oid,true);
           reqList.appendChild(li);
         } else {
+          if(locked[doc.id])return; // hide locked DMs from main list
           // Regular DM or outgoing request — show in DMs
           const li=document.createElement('li');li.className='sb-item'+(activeCh?.id===doc.id?' active':'');li.dataset.id=doc.id;
-          li.innerHTML=`<img class="item-av" src="${esc(other.photoURL||dicebear(oid))}" alt=""/><span class="item-name">${esc(other.username)}${isReq&&iAmSender?' <span style="font-size:10px;color:var(--mut)">(pending)</span>':''}</span>`;
+          li.innerHTML=`<img class="item-av" src="${esc(other.photoURL||dicebear(oid))}" alt=""/><span class="item-name" style="flex:1">${esc(other.username)}${isReq&&iAmSender?' <span style="font-size:10px;color:var(--mut)">(pending)</span>':''}</span>`;
           li.onclick=()=>openDM(doc.id,other.username,other.photoURL||'',oid,isReq&&!iAmSender);
+          addSb3dot(li,doc.id,'dm',other.username);
           list.appendChild(li);
         }
       });
@@ -1763,6 +1792,173 @@ $('mute-btn').onclick=$('vid-mute-btn').onclick=function(){
 $('vid-cam-btn').onclick=function(){
   if(!localStream)return;isCamOff=!isCamOff;localStream.getVideoTracks().forEach(t=>t.enabled=!isCamOff);this.style.opacity=isCamOff?.45:1;
 };
+
+// ══════════════════════════════════════════
+// SIDEBAR 3-DOT MENU (per chat item)
+// ══════════════════════════════════════════
+function addSb3dot(li, chatId, chatType, chatName){
+  const btn=document.createElement('button');
+  btn.className='sb-3dot';
+  btn.title='Options';
+  btn.innerHTML='<svg width="13" height="13" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>';
+  btn.onclick=e=>{
+    e.stopPropagation();
+    document.querySelectorAll('.sb-ctx').forEach(m=>m.remove());
+    const isLocked=isChatlocked(chatId);
+    const menu=document.createElement('div');menu.className='sb-ctx';
+    // Lock / Unlock option
+    const lockItem=document.createElement('div');lockItem.className='sb-ctx-item lock';
+    lockItem.innerHTML=isLocked?'🔓 Move to All Chats':'🔐 Move to Locked';
+    lockItem.onclick=()=>{menu.remove();isLocked?unlockChat(chatId,chatName):promptLockChat(chatId,chatName,chatType);};
+    menu.appendChild(lockItem);
+    // Leave / Delete
+    if(chatType==='dm'){
+      const leaveItem=document.createElement('div');leaveItem.className='sb-ctx-item danger';
+      leaveItem.innerHTML='🚪 Leave Chat';
+      leaveItem.onclick=async()=>{menu.remove();const ok=await confirm2('Leave Chat',`Leave your chat with ${chatName}?`,'🚪','Leave');if(ok){await db.collection('dms').doc(chatId).update({[`hidden.${ME.uid}`]:true});if(activeCh?.id===chatId){activeCh=null;$('chat-main').innerHTML='<div class="empty-view"><div class="empty-icon">💬</div><div class="empty-title">Welcome to Chatuwa</div><p class="empty-desc">Join a room or start a DM.</p></div>';}}};
+      menu.appendChild(leaveItem);
+    }
+    const rect=btn.getBoundingClientRect();
+    menu.style.top=rect.bottom+4+'px';
+    menu.style.left=Math.min(rect.left,window.innerWidth-170)+'px';
+    document.body.appendChild(menu);
+  };
+  li.appendChild(btn);
+}
+
+// Close sb-ctx on outside click
+document.addEventListener('click',()=>document.querySelectorAll('.sb-ctx').forEach(m=>m.remove()));
+
+// ══════════════════════════════════════════
+// LOCK CHAT SYSTEM
+// ══════════════════════════════════════════
+// Store locked chats + their PIN hashes in localStorage
+function getLockedData(){
+  try{return JSON.parse(localStorage.getItem('lockedChats')||'{}');}catch{return {};}
+}
+function saveLockedData(data){localStorage.setItem('lockedChats',JSON.stringify(data));}
+function isChatlocked(chatId){return !!getLockedData()[chatId];}
+
+// Hash PIN simply (not crypto but good enough for local lock)
+function hashPin(pin){
+  let h=0;for(let i=0;i<pin.length;i++){h=((h<<5)-h)+pin.charCodeAt(i);h|=0;}
+  return String(h);
+}
+
+// PIN modal state
+let pinMode=null; // 'set' | 'verify'
+let pinChatId=null,pinChatName=null,pinChatType=null;
+let pinEntry='';
+let pinVerifyCallback=null;
+
+window.pinKey=function(k){
+  if(k==='del'){pinEntry=pinEntry.slice(0,-1);}
+  else if(pinEntry.length<4){pinEntry+=k;}
+  updatePinDots();
+  $('pin-error').textContent='';
+  if(pinEntry.length===4){
+    setTimeout(()=>{
+      if(pinMode==='set'){doSetPin();}
+      else if(pinMode==='verify'){doVerifyPin();}
+    },120);
+  }
+};
+
+function updatePinDots(){
+  for(let i=0;i<4;i++){
+    const d=$('pd'+i);
+    if(d) d.classList.toggle('filled',i<pinEntry.length);
+  }
+}
+
+function promptLockChat(chatId,chatName,chatType){
+  pinMode='set';pinChatId=chatId;pinChatName=chatName;pinChatType=chatType;pinEntry='';
+  $('pin-title').textContent='Lock "'+chatName+'"';
+  $('pin-sub').textContent='Set a 4-digit PIN to protect this chat.';
+  $('pin-error').textContent='';
+  updatePinDots();showOv('pin-ov');
+}
+
+function doSetPin(){
+  const data=getLockedData();
+  data[pinChatId]={name:pinChatName,type:pinChatType,pin:hashPin(pinEntry)};
+  saveLockedData(data);
+  hideOv('pin-ov');pinEntry='';
+  refreshLockedSidebar();
+  toast('"'+pinChatName+'" moved to Locked Chats 🔐','s');
+}
+
+function unlockChat(chatId,chatName){
+  pinMode='verify';pinChatId=chatId;pinEntry='';
+  $('pin-title').textContent='Unlock "'+chatName+'"';
+  $('pin-sub').textContent='Enter your PIN to unlock this chat.';
+  $('pin-error').textContent='';
+  updatePinDots();
+  pinVerifyCallback=()=>{
+    // Remove from locked
+    const data=getLockedData();delete data[chatId];saveLockedData(data);
+    refreshLockedSidebar();hideOv('pin-ov');pinEntry='';
+    toast('"'+chatName+'" moved back to All Chats','s');
+  };
+  showOv('pin-ov');
+}
+
+function openLockedChat(chatId,chatName){
+  pinMode='verify';pinChatId=chatId;pinEntry='';
+  $('pin-title').textContent='🔐 '+chatName;
+  $('pin-sub').textContent='Enter your PIN to open this chat.';
+  $('pin-error').textContent='';
+  updatePinDots();
+  const data=getLockedData();
+  const info=data[chatId];
+  pinVerifyCallback=async()=>{
+    hideOv('pin-ov');pinEntry='';
+    // Open the chat
+    if(info.type==='dm'){
+      const snap=await db.collection('dms').doc(chatId).get();
+      if(!snap.exists)return;
+      const dm=snap.data();
+      const oid=dm.members.find(m=>m!==ME.uid);
+      const other=dm.memberInfo?.[oid]||{username:chatName,photoURL:''};
+      openDM(chatId,other.username,other.photoURL||'',oid,false);
+    } else {
+      const snap=await db.collection('rooms').doc(chatId).get();
+      if(!snap.exists)return;
+      openRoom(chatId,snap.data());
+    }
+  };
+  showOv('pin-ov');
+}
+
+function doVerifyPin(){
+  const data=getLockedData();
+  const info=data[pinChatId];
+  if(!info){hideOv('pin-ov');pinEntry='';return;}
+  if(hashPin(pinEntry)===info.pin){
+    if(pinVerifyCallback)pinVerifyCallback();
+    pinVerifyCallback=null;
+  } else {
+    pinEntry='';updatePinDots();
+    $('pin-error').textContent='Wrong PIN. Try again.';
+  }
+}
+
+function refreshLockedSidebar(){
+  const data=getLockedData();
+  const keys=Object.keys(data);
+  const sec=$('locked-section');const list=$('locked-list');
+  sec.style.display=keys.length>0?'flex':'none';
+  list.innerHTML='';
+  keys.forEach(chatId=>{
+    const info=data[chatId];
+    const li=document.createElement('li');
+    li.className='sb-item'+(activeCh?.id===chatId?' active':'');
+    li.dataset.id=chatId;
+    li.innerHTML=`<span class="item-lockbadge">🔐</span><span class="item-name">${esc(info.name)}</span>`;
+    li.onclick=()=>openLockedChat(chatId,info.name);
+    list.appendChild(li);
+  });
+}
 
 function scrollBottom(){const a=$('msgs-area');if(a)a.scrollTop=a.scrollHeight;}
 </script>
